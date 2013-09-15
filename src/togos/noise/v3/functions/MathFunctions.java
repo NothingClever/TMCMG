@@ -378,6 +378,23 @@ public class MathFunctions
 			}
 		}) );
 		
+		CONTEXT.put("png", builtinBinding(new NoiseFunction() {
+			@Override public String getName() { return "png"; }
+			
+			ThreadLocal<PngNoise> image = new ThreadLocal<PngNoise>() {
+				@Override public PngNoise initialValue() {
+					return new PngNoise();
+				}
+			};
+			
+			@Override double apply(double a, double b, double c) {
+				return image.get().apply((float)a, (float)b, (float)c);
+			}
+			
+			@Override protected LFunctionDaDaDa_Da getLFunction() {
+				return image.get();
+			}
+		}) );
 		CONTEXT.put("if", builtinBinding(new BuiltinFunction<Object>() {
 			@Override public String getName() { return "if"; }
 			
