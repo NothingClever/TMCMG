@@ -9,6 +9,7 @@ import togos.lang.CompileError;
 import togos.lang.RuntimeError;
 import togos.noise.MathUtil;
 import togos.noise.function.D5_2Perlin;
+import togos.noise.function.PngNoise;
 import togos.noise.function.SimplexNoise;
 import togos.noise.v3.BindingError;
 import togos.noise.v3.program.compiler.ExpressionVectorProgramCompiler;
