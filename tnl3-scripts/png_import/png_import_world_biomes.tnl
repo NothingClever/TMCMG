@@ -1,0 +1,709 @@
+min(a,b) = if(a < b, a, b);
+max(a,b) = if(a > b, a, b);
+
+ridge( min, max, v ) = (
+	diff = max - min;
+	u = (v - min);
+	w = u % (2 * (max - min));
+	if( diff == 0, min,
+		w < diff, min + w,
+		max + diff - w 
+	)
+);
+
+fractal( iterations, input-scale, output-scale, input-scale-factor, output-scale-factor, dy, basis, x,y,z ) =
+	#(x,y,z) -> if(
+	if(
+		iterations == 0, 0,
+		output-scale * basis(
+			x / input-scale,
+			y / input-scale,
+			z / input-scale
+		) + fractal(
+			iterations - 1,
+			input-scale * input-scale-factor,
+			output-scale * output-scale-factor,
+			input-scale-factor, output-scale-factor,
+			dy, basis, x, y + dy, z )
+	);
+
+midpoint( iter, Hscale, Vscale, Hdelta, Vdelta, Rscale, q, w) = (
+	x = (floor(q / Hscale)) + if (iter % 2 < 1, 0, 0.5);
+	z = (floor(w / Hscale));# + if (iter % 2 < 1, 0, 0.5);
+	p1 = randXZ(x, z) * Rscale;
+	p2 = randXZ(x + 1, z) * Rscale;
+	p3 = randXZ(x, z + 1) * Rscale;	
+	p4 = randXZ(x + 1, z + 1) * Rscale;
+	#Bilinear interpolation taken from Wikipedia
+	sX = (q % Hscale) / Hscale;
+	sZ = (w % Hscale) / Hscale;
+	v = (p1 * (1 - sX) * (1 - sZ)) + 
+		(p2 * (1 - sZ) * sX) + 
+		(p3 * (1 - sX) * sZ) + 
+		(p4 * sX * sZ);
+	if ( iter <= 1,
+		v * Vscale,
+		(v * Vscale) + midpoint( iter - 1, Hscale * Hdelta, Vscale * Vdelta, Hdelta, Vdelta, Rscale, q, w)
+	)
+
+);
+randXZBig( x, z ) = (
+	n3 = (x * rand(x) + x) * rand( x * rand(x) + x );
+	n4 = n3 + z + 2147483562;
+	
+	n5 = n4 * rand( n4 );
+	n6 = n5 + x;
+	n7 = n6 * rand( n6 );
+	((n7 + z) % 2147483647)
+);
+#Should map randXZBig into 0-1
+randXZ( x, z ) = (
+	randXZBig( x, z ) / 2147483647.0
+);
+floor( a ) = (a - (a % 1));					
+abs( a ) = ( if( a < 0, a * -1,  a) );
+pos( a ) = ( if( a < 0, 0,  a) );
+simplexS( x,y,z, scale) = simplex( x / scale, y, z / scale);
+rand( s ) =  randBig(s) / 2147483648.0;	
+randBig( s ) = (s * 1103515245 + 12345) % 2147483648.0;
+#Noise functions for climate
+#Tried to sync with xstart and zstart w/o success
+biome_scale = 64;
+temp(x,z) = _heat(x,z); #(midpoint(2, 32, 0.1, 0.5, 0.5, 1, z + xstart, x + zstart ) * 2 + ridge( 0, 1, abs( 512 + z - x) % 1000 / 500)) / 2;
+rain(x,z) = _water(x,z); #(midpoint( 3, biome_scale , 1, 0.5, 0.5, 1, z + zstart, x + xstart ) * 1) / 1.75;
+#Replace with surface geology???
+drain(x,z) = _drain(x,z); #midpoint( 3, biome_scale, 1, 1, 0.75, 0.25, x  + xstart - 12947561, z  + zstart - 12348561) / 1.75;
+#Altitude adjustment equations
+alt_temp(x,z) = 0;#(land(x,z) / 255) - 0.45 ;
+
+alt_drain(x,z) = 0;#(land(x,z) / 255);
+
+#Real sensitive, can require some really small values
+#Temperature thresholds
+hot = 0.67;
+cold = 0.34;
+#Rainfall thresholds
+wet = 0.34;
+arid = 0.67;
+#Drainage thresholds
+lowdrain = 0.34;
+highdrain = 0.67;
+
+select_biome(x,z) = if( 
+						png(adjx(x),adjz(z), river_img) >= 0.75, RIVER,
+						land(x,z) <= 123, OCEAN,
+						drain(x,z) + alt_drain(x,z) < lowdrain,
+						if( temp(x,z) - alt_temp(x,z) < cold,
+								if(
+									rain(x,z) < arid, ICE_PLAIN,
+									rain(x,z) > wet, TAGIA,
+									TAGIA #moderate rain
+								),
+							temp(x,z) - alt_temp(x,z) > hot,
+								if(
+									rain(x,z) < arid, PLAINS,
+									rain(x,z) > wet, SWAMP,
+									FOREST #moderate rain
+								),
+							#temperate temperature
+							if(
+									rain(x,z) < arid, PLAINS,
+									rain(x,z) > wet, FOREST,
+									FOREST #moderate rain
+								)
+						),
+						drain(x,z) + alt_drain(x,z) > highdrain,
+						if( 
+							temp(x,z) - alt_temp(x,z) < cold,
+								if(
+									rain(x,z) < arid, ICE_PLAIN,
+									rain(x,z) > wet, ICE_PLAIN,
+									ICE_PLAIN #moderate rain
+								)
+							,
+							temp(x,z) - alt_temp(x,z) > hot,
+								if(
+									rain(x,z) < arid, DESERT,
+									rain(x,z) > wet, PLAINS,
+									JUNGLE #moderate rain
+								)
+							,
+							#temperate temperature
+							if(
+									rain(x,z) < arid, PLAINS,
+									rain(x,z) > wet, FOREST,
+									PLAINS #moderate rain
+								)
+						),
+						#moderate drainage
+						if( 
+							temp(x,z) - alt_temp(x,z) < cold,
+								if(
+									rain(x,z) < arid, ICE_PLAIN,
+									rain(x,z) > wet, TAGIA,
+									TAGIA #moderate rain
+								)
+							,
+							temp(x,z) - alt_temp(x,z) > hot,
+								if(
+									rain(x,z) < arid, DESERT,
+									rain(x,z) > wet, JUNGLE,
+									PLAINS #moderate rain
+								)
+							,
+							#temperate temperature
+							if(
+									rain(x,z) < arid, PLAINS,
+									rain(x,z) > wet, FOREST,
+									FOREST #moderate rain
+								)
+						)
+						
+					);
+					
+select_biome_test(x,z) = if( 
+						png(adjx(x),adjz(z), river_img) >= 0.75, RIVER,
+						land(x,z) <= 123, OCEAN,
+						drain(x,z) + alt_drain(x,z) < lowdrain,
+						if( temp(x,z) - alt_temp(x,z) < cold,
+								if(
+									rain(x,z) < arid, snow,
+									rain(x,z) > wet, ice,
+									ice #moderate rain
+								),
+							temp(x,z) - alt_temp(x,z) > hot,
+								if(
+									rain(x,z) < arid, grass,
+									rain(x,z) > wet, obsidian,
+									dirt #moderate rain
+								),
+							#temperate temperature
+							if(
+									rain(x,z) < arid, grass,
+									rain(x,z) > wet, dirt,
+									dirt #moderate rain
+								)
+						),
+						drain(x,z) + alt_drain(x,z) > highdrain,
+						if( 
+							temp(x,z) - alt_temp(x,z) < cold,
+								if(
+									rain(x,z) < arid, snow,
+									rain(x,z) > wet, snow,
+									snow #moderate rain
+								)
+							,
+							temp(x,z) - alt_temp(x,z) > hot,
+								if(
+									rain(x,z) < arid, sand,
+									rain(x,z) > wet, grass,
+									lava #moderate rain
+								)
+							,
+							#temperate temperature
+							if(
+									rain(x,z) < arid, grass,
+									rain(x,z) > wet, dirt,
+									grass #moderate rain
+								)
+						),
+						#moderate drainage
+						if( 
+							temp(x,z) - alt_temp(x,z) < cold,
+								if(
+									rain(x,z) < arid, snow,
+									rain(x,z) > wet, ice,
+									ice #moderate rain
+								)
+							,
+							temp(x,z) - alt_temp(x,z) > hot,
+								if(
+									rain(x,z) < arid, sand,
+									rain(x,z) > wet, lava,
+									grass #moderate rain
+								)
+							,
+							#temperate temperature
+							if(
+									rain(x,z) < arid, grass,
+									rain(x,z) > wet, dirt,
+									dirt #moderate rain
+								)
+						)
+						
+					);
+############################################################################################################################################
+# Steppe landform -very versitile
+############################################################################################################################################
+#Base height
+# sets limit on height of base terrain, when noise generates large values lowering this will create more ridges
+## Continental base
+## 32 is good for small rolling hills... like normal minecraft
+## 64 is well in between
+## 128 is good for steppes
+# scale of noise, a bigger value generates smoother continents, a small scale with a low height should make lots of ridges
+
+
+#Notes on use of mountians
+# Mountains are continent multiplied by scale.
+#	~ slope of continent directly affects mountain slopes, the faster cont. changes the steeper And narrower the mountains
+#	~ mountscale gives multiplier for cont. slope, a muliplier of two gives twice the slope
+#	~ Max height of mount will be (CONTINENTHEIGHT - mountbase) * scale so (32-12) * 6 -> 120 added to base so 40 + 120 = 160
+ 
+mountbase = 10; 				# at what height do mountians start
+mountscale = 2;		# continent noise is muliplied by this 
+#Using for foothills
+mountbase_low = 8; # at what height do foothills start
+mountscale_low = 1.5;
+#Using for rockies
+mountbase_sharp = 14; #29.25; # at what height do rockies start
+mountscale_sharp = 3.5; #2 was orginal
+
+##An attempt at removing the flat ridgelines normaly generated
+##May need to be adjusted when change continent scale
+bump(x,y,z) = fractal(1,32,8,1,1,1,simplex,x,y,z) * -1;
+
+mountians(x,z, s, h, seed) = (
+	mountbase + (((continent(x,z, s, h, seed) - mountbase) * mountscale ))  - 3
+);
+
+mountians_low(x,z, s, h, seed) = (
+	mountbase_low + ((continent(x,z, s, h, seed) - mountbase_low) * mountscale_low)  - 3
+);
+
+mountians_sharp(x,z, s, h, seed) = (
+	bump(x,seed,z) + (mountbase_sharp + ((continent(x,z, s, h, seed) - mountbase_sharp) * mountscale_sharp))
+);
+
+continent(x,z, scale, height, seed) = ridge(0, height, fractal(3,scale,16,25,8,0,simplex,x,seed,z) );
+steppe( x,z, base, s1, h1, seed) =  
+						if(
+						(continent(x,z, s1, h1, seed) > mountians(x,z, s1, h1, seed)) && (continent(x,z, s1, h1, seed) > mountians_low(x,z, s1, h1, seed)) && (continent(x,z, s1, h1, seed) > mountians_sharp(x,z, s1, h1, seed)),
+						base + continent(x,z, s1, h1, seed),
+						(mountians(x,z, s1, h1, seed) > continent(x,z, s1, h1, seed)) && (mountians(x,z, s1, h1, seed) > mountians_low(x,z, s1, h1, seed)) && (mountians(x,z, s1, h1, seed) > mountians_sharp(x,z, s1, h1, seed)),
+						base + mountians(x,z, s1, h1, seed),
+						(mountians_low(x,z, s1, h1, seed) > continent(x,z, s1, h1, seed)) && (mountians_low(x,z, s1, h1, seed) > mountians(x,z, s1, h1, seed)) && (mountians_low(x,z, s1, h1, seed) > mountians_sharp(x,z, s1, h1, seed)),
+						base + mountians_low(x,z, s1, h1, seed),
+						(mountians_sharp(x,z, s1, h1, seed) > continent(x,z, s1, h1, seed)) && (mountians_sharp(x,z, s1, h1, seed) > mountians(x,z, s1, h1, seed)) && (mountians_sharp(x,z, s1, h1, seed) > mountians_low(x,z, s1, h1, seed)),
+						base + mountians_sharp(x,z, s1, h1, seed),
+						0) ;
+
+
+# In tests with density 6 yeilded 0.15 blocks per sq block, uses simplex. Ropey structure like rivers only broken up
+# In practice much lower densities exist because of landform limitations
+# Lower densities inc amount of ore
+# Uses a two arg function for altitude
+# An example would be (x,z) -> 120 + simplexS(x, 342,z, 128) * 64
+# If a flat distribution is desired use: (x,z) -> (43)
+simplex_ore(ore, alt, s1, s2, s3, is_landform, layer_limit, density) = layer(
+	ore,
+	(x,z) -> if( is_landform(x,z),
+					if( steppe(x,z, alt(x,z), 16, density, s1) - 1 < alt(x,z),
+						#if( layer_limit(x,z) > steppe(x,z, alt(x,z), 16, density, s1) - simplexS(x,s2,z,32) * 16,
+								steppe(x,z, alt(x,z), 16, density, s1) - simplexS(x,s2,z,32) * 16, 
+								#-1),
+						-1),
+				-1),
+	(x,z) -> if( is_landform(x,z),
+				if( steppe(x,z, alt(x,z), 16, density, s1) - 1 < alt(x,z), 
+					if( layer_limit(x,z) > steppe(x,z, alt(x,z), 16, density, s1) + simplexS(x,s3,z,32) * 16, 
+							steppe(x,z, alt(x,z), 16, density, s1) + simplexS(x,s3,z,32) * 16, 
+							layer_limit(x,z)
+							),
+					-1), 
+				-1)
+);
+simplex_oreB(ore, alt, s1, s2, s3, layer_limitB, layer_limit, density) = layer(
+	ore,
+	(x,z) -> if( steppe(x,z, alt(x,z), 16, density, s1) - 1 < alt(x,z),
+						if( layer_limitB(x,z) < steppe(x,z, alt(x,z), 16, density, s1) - simplexS(x,s2,z,32) * 16,
+								steppe(x,z, alt(x,z), 16, density, s1) - simplexS(x,s2,z,32) * 16, 
+								layer_limitB(x,z)),
+						-1),
+	(x,z) -> if( steppe(x,z, alt(x,z), 16, density, s1) - 1 < alt(x,z), 
+					if( layer_limit(x,z) > steppe(x,z, alt(x,z), 16, density, s1) + simplexS(x,s3,z,32) * 16, 
+							steppe(x,z, alt(x,z), 16, density, s1) + simplexS(x,s3,z,32) * 16, 
+							layer_limit(x,z)
+							),
+					-1)
+);
+deep_cave_roof(x,z) = fractal( 3, 128, 64, 0.5, 0.5, 3, simplex, x, 5687, z);
+deep_cave_floor(x,z) = fractal( 3, 128, 64, 0.5, 0.5, 3, simplex, x, 31234, z);
+
+living_cave( air_mat, ground_mat, ground_depth, pool_mat, pool_alt, lights_mat, light_density, roof_mat, roof_depth, altitude, floor_func, roof_func, mask_func) = list(
+	layer(
+		air_mat,
+		(x,z) -> if( mask_func(x,z), altitude - floor_func(x,z), -1),
+		(x,z) -> if( mask_func(x,z), altitude + roof_func(x,z), -1)
+	),
+	#Ground cover
+	layer(
+		ground_mat,
+		(x,z) -> if( mask_func(x,z), altitude - floor_func(x,z) - ground_depth, -1),
+		(x,z) -> if( mask_func(x,z) && (altitude - floor_func(x,z) < altitude + roof_func(x,z)), altitude - floor_func(x,z), -1)
+	),
+	#Pools
+	layer(
+		pool_mat,
+		(x,z) -> if( mask_func(x,z) && altitude - floor_func(x,z) < pool_alt, altitude - floor_func(x,z), -1),
+		(x,z) -> if( mask_func(x,z) && altitude - floor_func(x,z) < pool_alt, pool_alt, -1)
+	),
+	#Lights
+	layer(
+		lights_mat,
+		(x,z) -> if( mask_func(x,z), altitude + roof_func(x,z) - light_density, -1),
+		(x,z) -> if( mask_func(x,z) && (altitude - floor_func(x,z) < altitude + roof_func(x,z)), altitude + roof_func(x,z), -1)
+	),
+	#Roof
+	layer(
+		roof_mat,
+		(x,z) -> if( mask_func(x,z), altitude + roof_func(x,z) - roof_depth, -1),
+		(x,z) -> if( mask_func(x,z) && (altitude - floor_func(x,z) < altitude + roof_func(x,z)), altitude + roof_func(x,z) , -1)
+	)
+);
+
+OCEAN = 0;
+PLAINS = 1;
+DESERT = 2;
+E_HILL = 3;
+FOREST = 4;
+TAGIA = 5;
+SWAMP = 6;
+RIVER = 7;
+FRZN_OCEAN = 10;
+FRZN_RIVER = 11;
+ICE_PLAIN = 12;
+ICE_MNT = 13;
+SHROOM = 14;
+SHROOM_SHORE = 15;
+BEACH = 16;
+E_HILL_EDGE = 20;
+JUNGLE = 21;
+
+materials.none    = -1;
+air     		= material(0x00);
+stone   		= material(0x01);
+grass   		= material(0x02);
+dirt    		= material(0x03);
+cobblestone 	= material(4);
+bedrock 		= material(0x07);
+water   		= material(0x09);
+lava    		= material(0x0B);
+sand    		= material(0x0C);
+gravel  		= material(0x0D); 
+coal_o  		= material(16);
+iron_o 	 		= material(15);
+gold_o  		= material(14);
+redstone_o 		= material(73);
+diamond_o 		= material(56);
+lapis_o			= 21;
+sandstone		= 24;
+mossycobble		= 48;
+brick			= 45;
+obsidian 		= 49;
+ice 			= 79;
+snow			= 80;
+clay 			= 82;
+netherrack		= 87;
+soulsand		= 88;
+glowstone		= 89;
+stonebricks		= 98;
+mycelium		= 110;
+netherbrick		= 112;
+endstone		= 121;
+emerald_o		= 129;
+netherquartz	= 153;
+
+#Plants
+#Saplings ready to grow
+oak = material( 6, 12 + 0);
+pine = material( 6, 12 + 1);
+birch = material( 6, 12 + 2);
+jungle = material( 6, 12 + 3);
+fern = material( 31, 2);
+deadshrub = 32;
+cacti = 81;
+reed = 83;
+pumpkin = 86;
+melon = 103;
+bean = 127;
+
+land_img = 1;
+river_img = 2;
+mud_img = 4;
+wear_img = 3;
+top_img = 5;
+btm_img = 6;
+geo_A = 7;
+geo_B = 8;
+geo_C = 9;
+geo_D = 10;
+drain_img = 100;
+heat_img  = 101;
+water_img = 102;
+
+#Use to position bedrock walls around area to export
+chunksx = 128;
+chunksz = 128;
+xstart_chunk = 0;
+zstart_chunk = 0;
+
+# Use to move major landform features around in export area
+# Notable exceptions are ores and caves, neither adjust with this
+xstart = 0;	#positive moves left, negative moves right
+zstart = 0; #positive moves down, negative moves up
+scalex = 2;
+scalez = 2;
+adjx(x) = (x + xstart) / scalex;
+adjz(z) = (z + zstart) / scalez;
+geoA(x,z) = 		( (png(adjx(x), adjz(z), geo_A) * 128) + 71) ;
+geoB(x,z) = 		( (png(adjx(x), adjz(z), geo_B) * 128) + 40) ;
+geoC(x,z) = 		( (png(adjx(x), adjz(z), geo_C) * 64) + 35) ;
+geoD(x,z) = 		( (png(adjx(x), adjz(z), geo_D) * 32) + 30) ;
+under_roof(x,z) = 	( (png(adjx(x), adjz(z), top_img) * 128) + 10) ;
+under_floor(x,z) = 	( (png(adjx(x), adjz(z), btm_img) * 64) ) ;
+landraw(x,z) = 		( (png( adjx(x), adjz(z), land_img) * 128 ) + 120) ;
+rvr(x,z) = 			png(adjx(x), adjz(z), river_img);
+mud(x,z) =			png(adjx(x), adjz(z), mud_img);
+wear(x,z) =			png(adjx(x), adjz(z), wear_img);
+_drain(x,z) = 			png(adjx(x), adjz(z), drain_img);
+_heat(x,z) =			png(adjx(x), adjz(z), heat_img);
+_water(x,z) =			png(adjx(x), adjz(z), water_img);
+#Weirdness
+dummy(x,z) = 10;
+blank_mask(x,z) = (if(dummy(x,z) > 0, 1, 0) == 1);
+land(x,z) = (
+		p1 = landraw( ((x)), ((z)) );
+		p2 = landraw( ((x + 2)), ((z)) );
+		p3 = landraw( ((x)), ((z + 2)) );
+		p4 = landraw( ((x + 2)), ((z + 2)) );
+		
+		sX = 0.5 + ((x % 2) / 2) - 0.25;
+		sZ = 0.5 + ((z % 2) / 2) - 0.25;
+		
+		(p1 * (1 - sX) * (1 - sZ)) + 
+				(p2 * (1 - sZ) * sX) + 
+				(p3 * (1 - sX) * sZ) + 
+				(p4 * sX * sZ)
+		);
+
+ter_import = layered-terrain(
+	layer(
+		netherrack,
+		1,
+		(x,z) -> under_floor(x,z)
+	),
+	simplex_ore(netherquartz, (x,z) -> (12 + simplexS(x,132,z, 128) * 32), 4, 23, 86, blank_mask, under_floor, 4),
+	simplex_ore(emerald_o, (x,z) -> (10 + simplexS(x,32,z, 128) * 32), 234, 23, 74, blank_mask, under_floor, 4),
+	simplex_ore(diamond_o, (x,z) -> (8 + simplexS(x,72,z, 128) * 32), 668, 23, 65, blank_mask, under_floor, 4),
+
+		
+	layer(
+		dirt,
+		(x,z) -> under_floor(x,z) - 2,
+		(x,z) -> under_floor(x,z)
+	),
+	layer(
+		glowstone,
+		(x,z) -> if(sin(x * z) > 0, under_floor(x,z) - 2, -1 ),
+		(x,z) -> if(sin(x * z) > 0, under_floor(x,z), -1 )
+	),
+	##Underground vegies
+	layer(
+		oak,
+		(x,z) -> if( sin(x * z) <= 0 && rain(x,z) < wet && rain(x,z) > arid, under_floor(x,z), -1),
+		(x,z) -> if( sin(x * z) <= 0 && rain(x,z) < wet && rain(x,z) > arid, under_floor(x,z) + 1, -1)
+	),
+	layer(
+		birch,
+		(x,z) -> if( sin(x * z) <= 0 && rain(x,z) > wet && rain(x,z) > arid && temp(x,z) > hot, under_floor(x,z), -1),
+		(x,z) -> if( sin(x * z) <= 0 && rain(x,z) > wet && rain(x,z) > arid && temp(x,z) > hot, under_floor(x,z), -1)
+	),
+	layer(
+		pine,
+		(x,z) -> if( sin(x * z) <= 0 && rain(x,z) < arid, under_floor(x,z), -1),
+		(x,z) -> if( sin(x * z) <= 0 && rain(x,z) < arid, under_floor(x,z) + 1, -1)
+	),
+	layer(
+		jungle,
+		(x,z) -> if( sin(x * z) <= 0 && rain(x,z) > wet, under_floor(x,z), -1),
+		(x,z) ->  if( sin(x * z) <= 0 && rain(x,z) > wet, under_floor(x,z) + 1, -1)
+	),
+	#### layer(
+		#### glowstone,
+		#### (x,z) -> under_roof(x,z) - 2,
+		#### (x,z) -> under_roof(x,z)
+	#### ),
+	layer(
+		endstone,
+		(x,z) -> under_roof(x,z),
+		(x,z) -> geoD(x,z)
+	),
+	simplex_oreB(lava, (x,z) -> (46 + simplexS(x,378960,z, 128) * 32), 869, 807576, 07457, under_roof, geoD, 4),
+	simplex_oreB(gold_o, (x,z) -> (44 + simplexS(x,30789,z, 128) * 32), 97872, 7860707, 32057, under_roof, geoD, 5),
+	simplex_oreB(netherquartz, (x,z) -> (42 + simplexS(x,3763,z, 128) * 32), 7678, 528, 587637, under_roof, geoD, 6),
+	layer(
+		clay,
+		(x,z) -> geoD(x,z),
+		(x,z) -> geoC(x,z)
+	),
+	layer(
+		soulsand,
+		(x,z) -> geoC(x,z) - 2,
+		(x,z) -> geoC(x,z)
+	),
+	simplex_oreB(iron_o, (x,z) -> (64 + simplexS(x,40137,z, 128) * 32), 197209, 16270, 9157, geoD, geoC, 2),
+	simplex_oreB(coal_o, (x,z) -> (63 + simplexS(x,47210,z, 128) * 32), 4790, 29479, 912951, geoD, geoC, 3),
+	simplex_oreB(emerald_o, (x,z) -> (62 + simplexS(x,24726,z, 128) * 32), 41076, 02674142, 21761, geoD, geoC, 4),
+	layer(
+		mossycobble,
+		(x,z) -> geoC(x,z),
+		(x,z) -> geoB(x,z)
+	),
+	simplex_oreB(redstone_o, (x,z) -> (76 + simplexS(x,65448,z, 128) * 32), 7890, 7807, 7807, geoC, geoB, 2),
+	simplex_oreB(gold_o, (x,z) -> (74 + simplexS(x,786,z, 128) * 32), 6780, 0786, 7860, geoC, geoB, 3),
+	simplex_oreB(iron_o, (x,z) -> (72 + simplexS(x,028,z, 15640) * 32), 05487, 75046, 78620, geoC, geoB, 4),
+	layer(
+		sandstone,
+		(x,z) -> geoB(x,z),
+		(x,z) -> geoA(x,z)
+	),
+	simplex_oreB(sand, (x,z) -> (96 + simplexS(x,34577,z, 128) * 32), 879, 6734, 678, geoB, geoA, 4),
+	simplex_oreB(gravel, (x,z) -> (94 + simplexS(x,7893,z, 128) * 32), 3987, 4156, 897, geoB, geoA, 5),
+	simplex_oreB(clay, (x,z) -> (92 + simplexS(x,1642,z, 128) * 32), 45, 459678, 133, geoB, geoA, 6),
+	simplex_oreB(lapis_o, (x,z) -> (97 + simplexS(x,55578,z, 128) * 32), 1111, 2777, 45644, geoB, geoA, 2),
+	simplex_oreB(iron_o, (x,z) -> (95 + simplexS(x,45678,z, 128) * 32), 5645, 456401, 45456, geoB, geoA, 4),
+	simplex_oreB(coal_o, (x,z) -> (93 + simplexS(x,1234,z, 128) * 32), 786, 123454, 10213, geoB, geoA, 5),
+	layer(
+		water,
+		(x,z) -> geoA(x,z),
+		123
+	),
+	layer(
+		stone,
+		(x,z) -> geoA(x,z),
+		(x,z) -> 0 + land(x,z)
+	),
+	simplex_oreB(redstone_o, (x,z) -> (116 + simplexS(x,278,z, 128) * 32), 34219, 86763, 4539, geoA, land, 2),
+	simplex_oreB(coal_o, (x,z) -> (114 + simplexS(x,7893,z, 128) * 32), 3776, 7893, 3568, geoA, land, 3),
+	simplex_oreB(iron_o, (x,z) -> (112 + simplexS(x,879,z, 128) * 32), 4726, 798, 12, geoA, land, 4),
+	simplex_oreB(coal_o, (x,z) -> (156 + simplexS(x,2458,z, 128) * 48), 125, 798, 274, geoA, land, 2),
+	simplex_oreB(gold_o, (x,z) -> (144 + simplexS(x,4378,z, 128) * 48), 6786, 369, 4648, geoA, land, 3),
+	simplex_oreB(lapis_o, (x,z) -> (132 + simplexS(x,767,z, 128) * 48), 816, 76, 786, geoA, land, 4),
+	layer(
+		dirt,
+		(x,z) -> 0 + land(x,z) -  if( mud(x,z) >= 205, 10, -1),
+		(x,z) -> 0 + land(x,z)
+	),
+	layer(
+		grass,
+		(x,z) -> 0 + land(x,z) - 1,
+		(x,z) -> 0 + land(x,z)
+	),
+	layer(
+		water,
+		(x,z) -> 0 + land(x,z) -  if( rvr(x,z) >= 0.75, 2, -1),
+		(x,z) -> 0 + land(x,z)
+	),
+	
+	layer(
+		stone,
+		(x,z) -> 0 + land(x,z) -  if( wear(x,z) >= 0.15, 8, -1),
+		(x,z) -> 0 + land(x,z)
+	),	
+
+	layer(
+		sand,
+		(x,z) -> 0 + land(x,z) -  if( rvr(x,z) >= 0.65, 1, -1),
+		(x,z) -> 0 + land(x,z)
+	),
+	#### layer(
+		#### bedrock,
+		#### 160,
+		#### 161
+		#### ),
+	layer(
+		gravel,
+		(x,z) -> 0 + if(land(x,z) >= 158, land(x,z), -1) -  if( rvr(x,z) >= 0.75, 1, -1),
+		(x,z) -> 0 + if(land(x,z) >= 158, land(x,z), -1)
+	),
+	layer(
+		clay,
+		(x,z) -> 0 + land(x,z) -  if( rvr(x,z) >= 0.75, 3, -1),
+		(x,z) -> 0 + land(x,z)
+	),
+	layer(
+		water,
+		(x,z) -> 0 + land(x,z) -  if( rvr(x,z) >= 0.75, 2, -1),
+		(x,z) -> 0 + land(x,z)
+	),
+	layer(
+		bedrock,
+		0,
+		1
+	),
+	#Narrow Caves
+	layer(
+		air,
+		(x,z) -> if( steppe(x,z, 70, 16, 6, 3456) - 0.75 < 70, 128 - 16 * abs(simplexS(x,123,z,16)), -1),
+		(x,z) -> if( steppe(x,z, 70, 16, 6, 3456) - 0.75 < 70, 130 + 16 * abs(simplexS(x,498,z,16)), -1)
+	),
+	#Wider caves
+	layer(
+		air,
+		(x,z) -> if( steppe(x,z, 50, 32, 6, 46544) - 1.75 < 170, 113 - 32 * abs(simplexS(x,984,z,32)), -1),
+		(x,z) -> if( steppe(x,z, 50, 32, 6, 46544) - 1.75 < 170, 110 + 32 * abs(simplexS(x,347,z,32)), -1)
+	),
+#Deep caves- Underground world inspired by Dwarf Fortress, Mystcraft cave worlds, and Togos mapscript
+	living_cave( air, mycelium, 1, water, 12, glowstone, 1.5, obsidian, 1, 74, deep_cave_floor, deep_cave_roof, blank_mask),
+		
+		#region grid
+#### layer (
+	#### bedrock,
+	#### 0,
+	#### (x,z) -> if ( 
+		#### ridge( 0,256, x - 256) > 240, 
+		#### 127,		
+		#### -1
+		#### )
+#### ),
+#### layer (
+	#### bedrock,
+	#### 0,
+	#### (x,z) -> if ( 
+		#### ridge( 0,256, z - 256) > 240,
+		#### 127,		
+		#### -1
+		#### )
+#### )
+#### #Biome testing
+#### layer(
+	#### (x,y,z) -> select_biome_test(x,z),
+	#### 1,
+	#### (x,z) -> land(x,z)
+#### ),
+layer (
+	bedrock,
+	0,
+	(x,z) ->  if ( 
+		(x >= (xstart_chunk * 16 ) ) and (x <= ((xstart_chunk + 1) * 16) ), 
+		250,
+		(x <= ((chunksx + xstart_chunk) * 16) ) and (x >= ((chunksx + xstart_chunk - 1) * 16) ),
+		250,		
+		-1
+		)
+),
+layer (
+	bedrock,
+	0,
+	(x,z) -> if ( 
+		(z >= (zstart_chunk * 16) ) and (z <= ((zstart_chunk + 1) * 16) ), 
+		250,
+		(z <= ((chunksz + zstart_chunk) * 16) ) and (z >= ((chunksz + zstart_chunk - 1) * 16) ),
+		250,		
+		-1
+		)
+),
+biome @ (x,z) -> select_biome(x,z)
+);
+ter_import
